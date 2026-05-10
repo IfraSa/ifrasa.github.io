@@ -1145,29 +1145,26 @@ document.querySelectorAll('.pub-card').forEach(card => {
 
 // ═══════════════════════════════════════════
 //  EDITOR PASSWORD — EMBEDDED HASH SYSTEM
-//  Default password: editor2026
 //  Change via Security tab → Download → Redeploy
 // ═══════════════════════════════════════════
 
-let EDITOR_HASH = 'f3de2dfa';   // FNV-1a hash of 'editor2026'
+// SHA-256 hash of the editor password (no plain-text password stored)
+const EDITOR_HASH = 'f5d467de14f2ed073653dd68eb25435b5439aaa95b855db464ee873218c2425a';
 
-function fnv32(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h.toString(16);
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
 let editorUnlocked = false;
 
 // Secret shortcut: Shift + Alt + E  (works on all OS/browsers)
 document.addEventListener('keydown', function(e) {
-  const k = e.key ? e.key.toLowerCase() : '';
-  // keyCode 69 = E, works even when Alt remaps the key on some OS
-  if (e.shiftKey && e.altKey && (k === 'e' || e.keyCode === 69)) {
+  // e.code is the physical key — never remapped by Shift/Alt/OS
+  // Triggers on: Shift + Alt + E (any browser, any OS, any keyboard layout)
+  if (e.shiftKey && e.altKey && e.code === 'KeyE') {
     e.preventDefault();
+    e.stopPropagation();
     toggleEditor();
   }
 });
@@ -1251,10 +1248,11 @@ function toggleEditorPwVisibility() {
   btn.textContent = inp.type === 'password' ? '\u{1F441}' : '\u{1F648}';
 }
 
-function submitEditorLogin() {
+async function submitEditorLogin() {
   const val = document.getElementById('editor-pw-input').value;
   const errEl = document.getElementById('editor-login-error');
-  if (fnv32(val) === EDITOR_HASH) {
+  const hash = await sha256(val);
+  if (hash === EDITOR_HASH) {
     editorUnlocked = true;
     document.getElementById('editor-login-modal').remove();
     openEditorPanel();
@@ -1268,11 +1266,12 @@ function submitEditorLogin() {
   }
 }
 
-function changeEditorPassword() {
+async function changeEditorPassword() {
   const current = document.getElementById('sec-current-pw').value;
   const p1 = document.getElementById('new-pw1').value;
   const p2 = document.getElementById('new-pw2').value;
-  if (fnv32(current) !== EDITOR_HASH) {
+  const currentHash = await sha256(current);
+  if (currentHash !== EDITOR_HASH) {
     showPwMsg('Current password is incorrect.', 'error'); return;
   }
   if (!p1 || p1.length < 6) {
@@ -1281,7 +1280,17 @@ function changeEditorPassword() {
   if (p1 !== p2) {
     showPwMsg('Passwords do not match.', 'error'); return;
   }
-  EDITOR_HASH = fnv32(p1);
+  const newHash = await sha256(p1);
+  // Update the hash in the page's script source so downloadPage() saves it
+  const scripts = document.querySelectorAll('script');
+  scripts.forEach(s => {
+    if (s.textContent.includes('EDITOR_HASH')) {
+      s.textContent = s.textContent.replace(
+        /const EDITOR_HASH = '[a-f0-9]+';/,
+        "const EDITOR_HASH = '" + newHash + "';"
+      );
+    }
+  });
   showPwMsg('Password updated! Download HTML now to save permanently.', 'success');
   document.getElementById('sec-current-pw').value = '';
   document.getElementById('new-pw1').value = '';
